@@ -1,0 +1,19 @@
+{
+  "projectName": "ChatApp",
+  "projectRootPath": "C:\\xampp\\htdocs\\projects\\package-creations\\create-prisma-php-app-dev\\create-prisma-php-app-test\\ChatApp",
+  "phpEnvironment": "XAMPP",
+  "phpRootPathExe": "C:\\xampp\\php\\php.exe",
+  "phpGenerateClassPath": "src/Lib/Prisma/Classes",
+  "bsTarget": "http://localhost/projects/package-creations/create-prisma-php-app-dev/create-prisma-php-app-test/ChatApp/",
+  "bsPathRewrite": {
+    "^/": "/projects/package-creations/create-prisma-php-app-dev/create-prisma-php-app-test/ChatApp/"
+  },
+  "backendOnly": false,
+  "swaggerDocs": false,
+  "tailwindcss": true,
+  "websocket": true,
+  "prisma": true,
+  "docker": false,
+  "version": "3.1.9",
+  "excludeFiles": []
+}
