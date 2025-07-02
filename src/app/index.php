@@ -18,20 +18,22 @@
         </div>
 
         <div class="p-2 space-y-2 overflow-y-auto h-[calc(100vh-256px)]">
-            <div class="flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-slate-100 bg-blue-50 border border-blue-200">
-                <div class="relative">
-                    <img src="https://placehold.co/40" class="h-12 w-12 rounded-full" />
-                    <div class="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white bg-green-500"></div>
-                </div>
-                <div class="flex-1 min-w-0">
-                    <div class="flex items-center">
-                        <h3 class="font-semibold truncate">Alice Johnson</h3>
-                        <span class="ml-auto bg-blue-500 text-white text-xs px-2 rounded">2</span>
+            <template pp-for="chat in chats">
+                <div class="flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-slate-100 bg-blue-50 border border-blue-200">
+                    <div class="relative">
+                        <img src="https://placehold.co/40" class="h-12 w-12 rounded-full" />
+                        <div class="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white bg-green-500"></div>
                     </div>
-                    <p class="text-sm text-slate-500 truncate">That sounds exciting! What kind of projects?</p>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center">
+                            <h3 class="font-semibold truncate">{{ chat.name }}</h3>
+                            <span pp-if="chat.unreadCount > 0" class="ml-auto bg-blue-500 text-white text-xs px-2 rounded">{{ chat.unreadCount }}</span>
+                        </div>
+                        <p class="text-sm text-slate-500 truncate">{{ chat.messages[chat.messages.length-1]?.content || 'No messages yet' }}</p>
+                        <p pp-if="chat.type === 'group'" class="text-xs text-slate-400">{{ chat.participants.length }} members</p>
+                    </div>
                 </div>
-            </div>
-
+            </template>
             <div class="flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-slate-100">
                 <div class="relative">
                     <img src="https://placehold.co/40" class="h-12 w-12 rounded-full" />
@@ -75,27 +77,26 @@
             <div class="flex items-center gap-3">
                 <img src="https://placehold.co/40" class="h-10 w-10 rounded-full" />
                 <div>
-                    <h2 class="font-semibold">Alice Johnson</h2>
-                    <p class="text-sm text-slate-500">online</p>
+                    <h2 class="font-semibold" pp-bind="selectedChat.participants[0].name"></h2>
+                    <p class="text-sm text-slate-500">{{ selectedChat.type === 'private' ? (selectedChat.participants[0]?.status + (selectedChat.participants[0]?.status === 'offline' ? ' ' + selectedChat.participants[0]?.lastSeen : '')) : selectedChat.participants.length + ' members' }}</p>
                 </div>
             </div>
         </div>
 
-        <!-- Messages (grow to fill) -->
-        <div class="flex-1 p-4 overflow-y-auto space-y-4">
+        <!-- Messages (grows to fill) -->
+        <div class="flex-1 p-4 overflow-y-auto space-y-4" id="chatMessages">
             <template pp-for="msg in selectedChat.messages">
-                <div class="flex gap-3 justify-start" pp-if="msg.senderId !== 'me'">
-                    <img src="https://placehold.co/40" class="h-8 w-8 rounded-full" />
-                    <div class="max-w-xs lg:max-w-md px-4 py-2 rounded-2xl shadow-sm bg-white text-slate-900 rounded-bl-md border border-slate-200">
+                <div class="flex gap-3 {{ msg.senderId === 'me' ? 'justify-end' : 'justify-start' }}">
+                    <img pp-if="msg.senderId !== 'me'"
+                        pp-bind-src="selectedChat.participants.find(p => p.id === msg.senderId)?.avatar || 'https://placehold.co/40'"
+                        class="h-8 w-8 rounded-full" />
+                    <div class="max-w-xs lg:max-w-md px-4 py-2 rounded-2xl shadow-sm {{ msg.senderId === 'me' 
+                            ? 'bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-br-md' 
+                            : 'bg-white text-slate-900 rounded-bl-md border border-slate-200' }}">
                         <p class="text-sm">{{ msg.content }}</p>
-                        <p class="text-xs mt-1 text-slate-500">{{ formatTime(msg.timestamp) }}</p>
-                    </div>
-                </div>
-
-                <div class="flex gap-3 justify-end" pp-if="msg.senderId === 'me'">
-                    <div class="max-w-xs lg:max-w-md px-4 py-2 rounded-2xl shadow-sm bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-br-md">
-                        <p class="text-sm">{{ msg.content }}</p>
-                        <p class="text-xs mt-1 text-blue-100">{{ formatTime(msg.timestamp) }}</p>
+                        <p class="text-xs mt-1 {{ msg.senderId === 'me' ? 'text-blue-100' : 'text-slate-500' }}">
+                            {{ formatTime(msg.timestamp) }}
+                        </p>
                     </div>
                 </div>
             </template>
@@ -104,8 +105,16 @@
         <!-- Chat input always stays at bottom -->
         <div class="p-4 border-t bg-white/80">
             <div class="flex items-center gap-3">
-                <input oninput="setMessage(this.value)" type="text" placeholder="Type a message..." class="flex-1 py-2 px-4 rounded-full border bg-slate-50" onkeypress="if(event.key === 'Enter') sendMessage()" />
-                <button onclick="sendMessage()" class="h-8 w-8 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 text-white flex items-center justify-center">➡️</button>
+                <input oninput="setMessage(this.value)"
+                    value="{{ message }}"
+                    type="text"
+                    placeholder="Type a message..."
+                    class="flex-1 py-2 px-4 rounded-full border bg-slate-50"
+                    onkeypress="if(event.key === 'Enter') sendMessage()" />
+                <button onclick="sendMessage()"
+                    class="h-8 w-8 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 text-white flex items-center justify-center">
+                    ➡️
+                </button>
             </div>
         </div>
     </div>
@@ -225,6 +234,7 @@
             content: messageValue,
             timestamp: new Date()
         };
+        console.log("🚀 ~ sendMessage ~ newMsg:", newMsg)
         setSelectedChat({
             ...selectedChatValue,
             messages: [...selectedChatValue.messages, newMsg]
@@ -245,6 +255,7 @@
     }
 
     export function formatTime(date) {
+        console.log("🚀 ~ formatTime ~ date:", date)
         return new Date(date).toLocaleTimeString([], {
             hour: '2-digit',
             minute: '2-digit'
@@ -265,4 +276,6 @@
             });
         }, 50)
     }, [selectedChat.value?.messages?.length])
+
+    pphp.debugProps();
 </script>
