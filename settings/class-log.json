@@ -1,5 +1,20 @@
 {
   "Lib\\PHPX\\PHPX": {
     "filePath": "Lib\\PHPX\\PHPX.php"
+  },
+  "Lib\\PHPX\\PPIcons\\Plus": {
+    "filePath": "Lib\\PHPX\\PPIcons\\Plus.php"
+  },
+  "Lib\\PHPX\\PPIcons\\Search": {
+    "filePath": "Lib\\PHPX\\PPIcons\\Search.php"
+  },
+  "Lib\\PHPX\\PPIcons\\SendHorizontal": {
+    "filePath": "Lib\\PHPX\\PPIcons\\SendHorizontal.php"
+  },
+  "Lib\\PHPX\\PPIcons\\Moon": {
+    "filePath": "Lib\\PHPX\\PPIcons\\Moon.php"
+  },
+  "Lib\\PHPX\\PPIcons\\Settings": {
+    "filePath": "Lib\\PHPX\\PPIcons\\Settings.php"
   }
 }

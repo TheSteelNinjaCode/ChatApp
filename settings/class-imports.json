@@ -1,1 +1,64 @@
-{}
+{
+  "Moon": [
+    {
+      "className": "Lib\\PHPX\\PPIcons\\Moon",
+      "filePath": "Lib\\PHPX\\PPIcons\\Moon.php",
+      "importer": "C:\\xampp\\htdocs\\projects\\package-creations\\create-prisma-php-app-dev\\create-prisma-php-app-test\\ChatApp\\src\\app\\index.php"
+    }
+  ],
+  "Plus": [
+    {
+      "className": "Lib\\PHPX\\PPIcons\\Plus",
+      "filePath": "Lib\\PHPX\\PPIcons\\Plus.php",
+      "importer": "C:\\xampp\\htdocs\\projects\\package-creations\\create-prisma-php-app-dev\\create-prisma-php-app-test\\ChatApp\\src\\app\\index.php"
+    }
+  ],
+  "Search": [
+    {
+      "className": "Lib\\PHPX\\PPIcons\\Search",
+      "filePath": "Lib\\PHPX\\PPIcons\\Search.php",
+      "importer": "C:\\xampp\\htdocs\\projects\\package-creations\\create-prisma-php-app-dev\\create-prisma-php-app-test\\ChatApp\\src\\app\\index.php"
+    }
+  ],
+  "SendHorizontal": [
+    {
+      "className": "Lib\\PHPX\\PPIcons\\SendHorizontal",
+      "filePath": "Lib\\PHPX\\PPIcons\\SendHorizontal.php",
+      "importer": "C:\\xampp\\htdocs\\projects\\package-creations\\create-prisma-php-app-dev\\create-prisma-php-app-test\\ChatApp\\src\\app\\index.php"
+    }
+  ],
+  "Settings": [
+    {
+      "className": "Lib\\PHPX\\PPIcons\\Settings",
+      "filePath": "Lib\\PHPX\\PPIcons\\Settings.php",
+      "importer": "C:\\xampp\\htdocs\\projects\\package-creations\\create-prisma-php-app-dev\\create-prisma-php-app-test\\ChatApp\\src\\app\\index.php"
+    }
+  ],
+  "PHPX": [
+    {
+      "className": "Lib\\PHPX\\PHPX",
+      "filePath": "Lib\\PHPX\\PHPX.php",
+      "importer": "C:\\xampp\\htdocs\\projects\\package-creations\\create-prisma-php-app-dev\\create-prisma-php-app-test\\ChatApp\\src\\Lib\\PHPX\\PPIcons\\Moon.php"
+    },
+    {
+      "className": "Lib\\PHPX\\PHPX",
+      "filePath": "Lib\\PHPX\\PHPX.php",
+      "importer": "C:\\xampp\\htdocs\\projects\\package-creations\\create-prisma-php-app-dev\\create-prisma-php-app-test\\ChatApp\\src\\Lib\\PHPX\\PPIcons\\Plus.php"
+    },
+    {
+      "className": "Lib\\PHPX\\PHPX",
+      "filePath": "Lib\\PHPX\\PHPX.php",
+      "importer": "C:\\xampp\\htdocs\\projects\\package-creations\\create-prisma-php-app-dev\\create-prisma-php-app-test\\ChatApp\\src\\Lib\\PHPX\\PPIcons\\Search.php"
+    },
+    {
+      "className": "Lib\\PHPX\\PHPX",
+      "filePath": "Lib\\PHPX\\PHPX.php",
+      "importer": "C:\\xampp\\htdocs\\projects\\package-creations\\create-prisma-php-app-dev\\create-prisma-php-app-test\\ChatApp\\src\\Lib\\PHPX\\PPIcons\\SendHorizontal.php"
+    },
+    {
+      "className": "Lib\\PHPX\\PHPX",
+      "filePath": "Lib\\PHPX\\PHPX.php",
+      "importer": "C:\\xampp\\htdocs\\projects\\package-creations\\create-prisma-php-app-dev\\create-prisma-php-app-test\\ChatApp\\src\\Lib\\PHPX\\PPIcons\\Settings.php"
+    }
+  ]
+}

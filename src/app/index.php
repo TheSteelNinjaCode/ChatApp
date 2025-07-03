@@ -1,28 +1,42 @@
+<?php
+
+use Lib\PHPX\PPIcons\{Moon, Plus, Search, SendHorizontal, Settings};
+?>
+
 <div class="flex h-screen bg-gradient-to-br from-slate-50 to-slate-100">
     <!-- Sidebar -->
-    <div class="w-80 border-r bg-white/80 backdrop-blur-sm">
+    <div class="w-80 flex flex-col border-r border-slate-200 bg-white/80 backdrop-blur-sm">
+        <!-- Top: Header & Search -->
         <div class="p-4 border-b border-slate-200">
             <div class="flex items-center justify-between mb-4">
                 <h1 class="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">ChatApp</h1>
                 <div class="flex items-center gap-2">
-                    <button class="h-8 w-8 rounded hover:bg-slate-200 flex items-center justify-center">🌙</button>
-                    <button class="h-8 w-8 rounded hover:bg-slate-200 flex items-center justify-center">⚙️</button>
+                    <button class="h-8 w-8 rounded hover:bg-slate-200 flex items-center justify-center" onclick="toggleDark()">
+                        <Moon class="size-5 {{ isDark ? 'text-yellow-400' : 'text-slate-500' }}" />
+                    </button>
+                    <button class="h-8 w-8 rounded hover:bg-slate-200 flex items-center justify-center">
+                        <Settings class="size-5 text-slate-500" />
+                    </button>
                 </div>
             </div>
             <div class="relative">
-                <input placeholder="Search conversations..." class="pl-10 w-full py-2 rounded border border-slate-200 bg-slate-50" />
-                <svg class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M15 11a4 4 0 11-8 0 4 4 0 018 0z" />
-                </svg>
+                <input
+                    type="search"
+                    placeholder="Search conversations…"
+                    class="pl-10 w-full py-2 rounded border border-slate-200 bg-slate-50"
+                    pp-bind-value="search"
+                    oninput="setSearch(this.value)" />
+                <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-4 w-4" />
             </div>
         </div>
 
-        <div class="p-2 space-y-2 overflow-y-auto h-[calc(100vh-256px)]">
-            <template pp-for="chat in chats">
-                <div class="flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-slate-100 bg-blue-50 border border-blue-200">
+        <!-- Middle: Conversations grow to fill -->
+        <div class="flex-1 p-2 space-y-2 overflow-y-auto">
+            <template pp-for="chat in filteredChats">
+                <div class="flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-slate-100 {{ selectedChat.id === chat.id ? 'bg-blue-50 border border-blue-200' : '' }}" onclick="selectChat(chat)">
                     <div class="relative">
                         <img src="https://placehold.co/40" class="h-12 w-12 rounded-full" />
-                        <div class="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white bg-green-500"></div>
+                        <div pp-if="chat.type === 'private'" class="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white {{ getStatusColor(chat.participants[0]?.status) }}"></div>
                     </div>
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center">
@@ -34,38 +48,12 @@
                     </div>
                 </div>
             </template>
-            <div class="flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-slate-100">
-                <div class="relative">
-                    <img src="https://placehold.co/40" class="h-12 w-12 rounded-full" />
-                    <div class="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white bg-yellow-500"></div>
-                </div>
-                <div class="flex-1 min-w-0">
-                    <div class="flex items-center">
-                        <h3 class="font-semibold truncate">Design Team</h3>
-                        <span class="ml-auto bg-blue-500 text-white text-xs px-2 rounded">5</span>
-                    </div>
-                    <p class="text-sm text-slate-500 truncate">Thanks! I spent a lot of time on the color scheme.</p>
-                    <p class="text-xs text-slate-400">3 members</p>
-                </div>
-            </div>
-
-            <div class="flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-slate-100">
-                <div class="relative">
-                    <img src="https://placehold.co/40" class="h-12 w-12 rounded-full" />
-                    <div class="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white bg-gray-400"></div>
-                </div>
-                <div class="flex-1 min-w-0">
-                    <div class="flex items-center">
-                        <h3 class="font-semibold truncate">Bob Smith</h3>
-                    </div>
-                    <p class="text-sm text-slate-500 truncate">What time works for you?</p>
-                </div>
-            </div>
         </div>
 
-        <div class="p-4 border-t border-slate-200">
-            <button class="w-full py-2 rounded bg-gradient-to-r from-blue-500 to-purple-500 text-white hover:from-blue-600 hover:to-purple-600 flex items-center justify-center gap-2">
-                ➕ New Chat
+        <!-- Bottom: New Chat always stays same height -->
+        <div class="p-4 border-t border-slate-200 bg-white/80">
+            <button class="w-full h-[42px] px-4 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 text-white hover:from-blue-600 hover:to-purple-600 flex items-center justify-center gap-2">
+                <Plus class="size-5" /> New Chat
             </button>
         </div>
     </div>
@@ -77,7 +65,7 @@
             <div class="flex items-center gap-3">
                 <img src="https://placehold.co/40" class="h-10 w-10 rounded-full" />
                 <div>
-                    <h2 class="font-semibold" pp-bind="selectedChat.participants[0].name"></h2>
+                    <h2 class="font-semibold" pp-bind="selectedChat.name"></h2>
                     <p class="text-sm text-slate-500">{{ selectedChat.type === 'private' ? (selectedChat.participants[0]?.status + (selectedChat.participants[0]?.status === 'offline' ? ' ' + selectedChat.participants[0]?.lastSeen : '')) : selectedChat.participants.length + ' members' }}</p>
                 </div>
             </div>
@@ -103,17 +91,17 @@
         </div>
 
         <!-- Chat input always stays at bottom -->
-        <div class="p-4 border-t bg-white/80">
+        <div class="p-4 border-t border-slate-200 bg-white/80">
             <div class="flex items-center gap-3">
                 <input oninput="setMessage(this.value)"
                     value="{{ message }}"
                     type="text"
                     placeholder="Type a message..."
-                    class="flex-1 py-2 px-4 rounded-full border bg-slate-50"
+                    class="flex-1 py-2 px-4 rounded-full border border-slate-200 bg-slate-50"
                     onkeypress="if(event.key === 'Enter') sendMessage()" />
                 <button onclick="sendMessage()"
                     class="h-8 w-8 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 text-white flex items-center justify-center">
-                    ➡️
+                    <SendHorizontal class="size-4" />
                 </button>
             </div>
         </div>
@@ -121,10 +109,12 @@
 </div>
 
 <script>
-    const [chats, setChats] = pphp.state([])
-    const [selectedChat, setSelectedChat] = pphp.state(null)
-    const [message, setMessage] = pphp.state('')
-    const [isDark, setIsDark] = pphp.state(false)
+    const [search, setSearch] = pphp.state('');
+    const [chats, setChats] = pphp.state([]);
+    const [filteredChats, setFiltered] = pphp.state([]);
+    const [selectedChat, setSelectedChat] = pphp.state(null);
+    const [message, setMessage] = pphp.state('');
+    const [isDark, setIsDark] = pphp.state(false);
 
     const users = [{
             id: "1",
@@ -218,15 +208,38 @@
                     timestamp: new Date(Date.now() - 3540000)
                 },
             ]
+        },
+        {
+            id: "4",
+            name: "David Wilson",
+            type: "private",
+            participants: [users[3]],
+            unreadCount: 1,
+            messages: [{
+                    id: "8",
+                    senderId: "4",
+                    content: "Hey, are you there?",
+                    timestamp: new Date(Date.now() - 120000)
+                },
+                {
+                    id: "9",
+                    senderId: "me",
+                    content: "Yes, I'm here! What's up?",
+                    timestamp: new Date(Date.now() - 60000)
+                },
+            ]
         }
-    ])
-    setSelectedChat(chats.value[0])
+    ]);
+
+    setSelectedChat(chats[0]);
+
+    export function selectChat(chat) {
+        setSelectedChat(chats.find(c => c.id === chat.id) || null);
+    }
 
     export function sendMessage() {
         const selectedChatValue = selectedChat.value;
-        console.log("🚀 ~ sendMessage ~ selectedChatValue:", selectedChatValue)
         const messageValue = message.value;
-        console.log("🚀 ~ sendMessage ~ messageValue:", messageValue)
         if (!messageValue.trim() || !selectedChatValue) return;
         const newMsg = {
             id: Date.now() + "",
@@ -234,7 +247,6 @@
             content: messageValue,
             timestamp: new Date()
         };
-        console.log("🚀 ~ sendMessage ~ newMsg:", newMsg)
         setSelectedChat({
             ...selectedChatValue,
             messages: [...selectedChatValue.messages, newMsg]
@@ -255,7 +267,6 @@
     }
 
     export function formatTime(date) {
-        console.log("🚀 ~ formatTime ~ date:", date)
         return new Date(date).toLocaleTimeString([], {
             hour: '2-digit',
             minute: '2-digit'
@@ -269,13 +280,33 @@
     }
 
     pphp.effect(() => {
+        const term = search.value.trim().toLowerCase()
+
+        if (!term) {
+            setFiltered(chats.value)
+            return
+        }
+
+        setFiltered(
+            chats.value.filter(chat =>
+                chat.name.toLowerCase().includes(term) ||
+                chat.participants.some(p =>
+                    p.name.toLowerCase().includes(term)
+                )
+            )
+        )
+    }, [search, chats])
+
+    pphp.effect(() => {
+        console.log('Selected chat changed:', selectedChat)
         setTimeout(() => {
             document.getElementById('chatMessages')?.scrollTo({
                 top: 99999,
                 behavior: "smooth"
             });
         }, 50)
-    }, [selectedChat.value?.messages?.length])
+
+    }, [selectedChat])
 
     pphp.debugProps();
 </script>

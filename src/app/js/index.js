@@ -1154,6 +1154,11 @@ class PPHP {
     // ─── 4) clear inline‐module bookkeeping ───────────────────────────
     this._inlineModuleFns.clear();
     this._inlineDepth = 0;
+    // ✅ ADD THESE MISSING RESETS:
+    this._currentProcessingHierarchy = null;
+    this._currentTemplateHierarchy = null;
+    this._currentExecutionScope = null;
+    this._stateHierarchy.clear(); // ← This is important!
     // ─── 5) clear binding & effect queues ─────────────────────────────
     this._bindings = [];
     this._pendingBindings.clear();
@@ -1168,7 +1173,24 @@ class PPHP {
     PPHP._debounceTimers.clear();
     this._updateScheduled = false;
     this._wheelHandlersStashed = false;
-    // ─── 8) rebuild your reactive root ────────────────────────────────
+    // ─── 8) Force garbage collection of any lingering references ──────
+    // *** NEW: Try to clean up any global variables that might interfere ***
+    try {
+      // Clear any global variables that might have been created by previous modules
+      const globalThis = window;
+      Object.getOwnPropertyNames(globalThis).forEach((prop) => {
+        if (prop.startsWith("__pphp_") || prop.startsWith("_temp_")) {
+          try {
+            delete globalThis[prop];
+          } catch (e) {
+            // Ignore errors for non-configurable properties
+          }
+        }
+      });
+    } catch (e) {
+      // Ignore cleanup errors
+    }
+    // ─── 9) rebuild your reactive root ────────────────────────────────
     this.props = this.makeReactive(this._rawProps);
     this._hydrated = false;
   }
@@ -1230,6 +1252,142 @@ class PPHP {
       __isLoop: true,
     };
     this._bindings.push(loopBinding);
+  }
+  processIfChainsInFragment(
+    frag,
+    loopConfig,
+    templateHierarchy,
+    item,
+    index,
+    itemBindings
+  ) {
+    const processed = new WeakSet();
+    // Find all pp-if elements in the fragment
+    frag.querySelectorAll("[pp-if]").forEach((ifEl) => {
+      if (processed.has(ifEl)) return;
+      // Build the conditional chain
+      const chain = [];
+      let cur = ifEl;
+      while (cur) {
+        if (cur.hasAttribute("pp-if")) {
+          chain.push({ el: cur, expr: cur.getAttribute("pp-if") });
+        } else if (cur.hasAttribute("pp-elseif")) {
+          chain.push({ el: cur, expr: cur.getAttribute("pp-elseif") });
+        } else if (cur.hasAttribute("pp-else")) {
+          chain.push({ el: cur, expr: null });
+        } else {
+          break;
+        }
+        processed.add(cur);
+        cur = cur.nextElementSibling;
+      }
+      // Compile expressions with loop context
+      chain.forEach((chainItem) => {
+        if (chainItem.expr !== null) {
+          const raw = chainItem.expr.replace(/^{\s*|\s*}$/g, "");
+          chainItem.deps = this.extractScopedDependencies(
+            raw,
+            templateHierarchy
+          );
+          const fn = this.makeScopedEvaluator(raw, templateHierarchy);
+          chainItem.evaluate = () => {
+            // Create loop context for evaluation
+            const scopedProps =
+              this._createScopedPropsContext(templateHierarchy);
+            const loopContext = {
+              ...scopedProps,
+              [loopConfig.itemName]: item,
+            };
+            if (loopConfig.idxName) loopContext[loopConfig.idxName] = index;
+            return !!fn(loopContext);
+          };
+        }
+      });
+      // Initial evaluation and setup
+      let shown = false;
+      for (const { el, expr, evaluate } of chain) {
+        if (!shown && expr !== null && evaluate()) {
+          el.removeAttribute("hidden");
+          shown = true;
+        } else if (!shown && expr === null) {
+          el.removeAttribute("hidden");
+          shown = true;
+        } else {
+          el.setAttribute("hidden", "");
+        }
+      }
+      // Create updater for this chain that will be called when dependencies change
+      const allDeps = new Set();
+      chain.forEach((chainItem) =>
+        chainItem.deps?.forEach((dep) => allDeps.add(dep))
+      );
+      // Add dependency on the entire array to ensure updates when loop changes
+      const scopedPrefix = templateHierarchy.join(".");
+      const fullArrayPath = scopedPrefix
+        ? `${scopedPrefix}.${loopConfig.arrExpr}`
+        : loopConfig.arrExpr;
+      allDeps.add(fullArrayPath);
+      const updater = () => {
+        // Get current item from the array using the item key
+        const evalArr = this.makeScopedEvaluator(
+          loopConfig.arrExpr,
+          templateHierarchy
+        );
+        const currentArr = evalArr(
+          this._createScopedPropsContext(templateHierarchy)
+        );
+        if (Array.isArray(currentArr)) {
+          // Find current item and index
+          const itemKey = this.getItemKey(item, index);
+          const currentItem = this.findItemByKey(currentArr, itemKey, item);
+          const currentIndex = currentArr.findIndex(
+            (arrayItem) =>
+              this.getItemKey(arrayItem, currentArr.indexOf(arrayItem)) ===
+              itemKey
+          );
+          if (currentItem && currentIndex !== -1) {
+            // Re-evaluate all conditions in the chain with current data
+            let shown = false;
+            for (const { el, expr, evaluate } of chain) {
+              if (expr !== null) {
+                // Update the evaluate function with current item data
+                const fn = this.makeScopedEvaluator(
+                  expr.replace(/^{\s*|\s*}$/g, ""),
+                  templateHierarchy
+                );
+                const scopedProps =
+                  this._createScopedPropsContext(templateHierarchy);
+                const loopContext = {
+                  ...scopedProps,
+                  [loopConfig.itemName]: currentItem,
+                };
+                if (loopConfig.idxName)
+                  loopContext[loopConfig.idxName] = currentIndex;
+                const result = !!fn(loopContext);
+                if (!shown && result) {
+                  el.removeAttribute("hidden");
+                  shown = true;
+                } else {
+                  el.setAttribute("hidden", "");
+                }
+              } else if (!shown) {
+                // pp-else case
+                el.removeAttribute("hidden");
+                shown = true;
+              } else {
+                el.setAttribute("hidden", "");
+              }
+            }
+          }
+        }
+      };
+      // Add this updater to the item bindings
+      itemBindings.push({
+        dependencies: allDeps,
+        update: updater,
+        __isLoop: true,
+      });
+    });
   }
   extractComprehensiveLoopDependencies(tpl, loopConfig, templateHierarchy) {
     const deps = new Set();
@@ -1374,7 +1532,7 @@ class PPHP {
       templateHierarchy,
       itemKey,
       item,
-      index, // ← se pasa el índice real
+      index,
       itemBindings
     );
     this.processElementBindingsInFragment(
@@ -1383,17 +1541,32 @@ class PPHP {
       templateHierarchy,
       itemKey,
       item,
-      index, // ← se pasa el índice real
+      index,
       itemBindings
     );
-    this.processEventHandlersInFragment(frag, loopConfig, item, index);
-    /* ── 5. registrar los bindings como pertenecientes al bucle ─────── */
+    this.processEventHandlersInFragment(
+      frag,
+      loopConfig,
+      templateHierarchy,
+      item,
+      index
+    );
+    /* ── 5. NEW: process pp-if chains within the fragment ──────────── */
+    this.processIfChainsInFragment(
+      frag,
+      loopConfig,
+      templateHierarchy,
+      item,
+      index,
+      itemBindings
+    );
+    /* ── 6. registrar los bindings como pertenecientes al bucle ─────── */
     itemBindings.forEach((binding) => {
-      binding.__isLoop = true; // marca especial para dependency-tracking
+      binding.__isLoop = true;
       this._bindings.push(binding);
     });
     this._currentTemplateHierarchy = null;
-    /* ── 6. devolver nodos y bindings creados ───────────────────────── */
+    /* ── 7. devolver nodos y bindings creados ───────────────────────── */
     return { nodes: Array.from(frag.childNodes), bindings: itemBindings };
   }
   processTextNodesInFragment(
@@ -1417,6 +1590,11 @@ class PPHP {
           ? `${scopedPrefix}.${loopConfig.arrExpr}`
           : loopConfig.arrExpr;
         deps.add(fullArrayPath);
+        for (const m of originalText.matchAll(PPHP._mustachePattern)) {
+          this.extractScopedDependencies(m[1], templateHierarchy).forEach((d) =>
+            deps.add(d)
+          );
+        }
         /* ── updater que re-evalúa cuando cambie el array ────────────── */
         const updater = this.createTextNodeUpdaterWithItemKey(
           t,
@@ -1571,7 +1749,11 @@ class PPHP {
         const attr = name.replace(/^pp-bind-/, "");
         // ✅ CRITICAL: Skip pp-bind if there's already a template for this attribute
         if (templateAttributes.has(attr)) {
-          continue;
+          if (this._boolAttrs.has(attr)) {
+            el.removeAttribute(attr);
+          } else {
+            continue;
+          }
         }
         this.createElementBindingWithItemKey(
           el,
@@ -1618,6 +1800,11 @@ class PPHP {
       ? `${scopedPrefix}.${loopConfig.arrExpr}`
       : loopConfig.arrExpr;
     deps.add(fullArrayPath);
+    for (const m of template.matchAll(PPHP._mustachePattern)) {
+      this.extractScopedDependencies(m[1], templateHierarchy).forEach((d) =>
+        deps.add(d)
+      );
+    }
     const updater = this.createAttributeTemplateUpdaterWithItemKey(
       el,
       attributeName,
@@ -1725,6 +1912,10 @@ class PPHP {
       ? `${scopedPrefix}.${loopConfig.arrExpr}`
       : loopConfig.arrExpr;
     deps.add(fullArrayPath);
+    // 🆕 incluye deps de la expresión (selectedChat, isDark, etc.)
+    this.extractScopedDependencies(value, templateHierarchy).forEach((d) =>
+      deps.add(d)
+    );
     /* ── 2. updater que localizará el ítem mediante itemKey ─────────── */
     const updater = this.createElementBindingUpdaterWithItemKey(
       el,
@@ -1911,25 +2102,62 @@ class PPHP {
       }
     }
   }
-  processEventHandlersInFragment(frag, loopConfig, item, index) {
+  processEventHandlersInFragment(
+    frag,
+    loopConfig,
+    templateHierarchy,
+    item,
+    index
+  ) {
     frag.querySelectorAll("*").forEach((el) => {
       for (const { name, value } of Array.from(el.attributes)) {
         const attrName = name.toLowerCase();
         if (!this._eventHandlers.has(attrName)) continue;
         let code = value;
+        // ✅ FIX: Use a safe serialization approach
+        const safeSerialize = (obj) => {
+          try {
+            // For complex objects, store them in a data attribute and reference them
+            if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+              const dataKey = `__pphp_data_${Date.now()}_${Math.random()
+                .toString(36)
+                .slice(2, 7)}`; // ✅ FIXED: Use slice instead of substr
+              el[dataKey] = obj;
+              return `(event.currentTarget.${dataKey} || event.target.${dataKey})`;
+            } else {
+              // For primitives and arrays, use JSON.stringify with proper escaping
+              return JSON.stringify(obj);
+            }
+          } catch (e) {
+            console.error("Failed to serialize item:", e);
+            return "null";
+          }
+        };
         code = code.replace(
           new RegExp(`\\b${loopConfig.itemName}\\b`, "g"),
-          JSON.stringify(item)
+          safeSerialize(item)
         );
         if (loopConfig.idxName) {
+          const idxExpr = `(globalThis.pphp._idxOf(${safeSerialize(item)}, '${
+            loopConfig.arrExpr
+          }', ${JSON.stringify(templateHierarchy)}))`;
           code = code.replace(
             new RegExp(`\\b${loopConfig.idxName}\\b`, "g"),
-            String(index)
+            idxExpr
           );
         }
         el.setAttribute(name, code);
       }
     });
+  }
+  _idxOf(item, arrExpr, hierarchy) {
+    try {
+      const evalArr = this.makeScopedEvaluator(arrExpr, hierarchy);
+      const arr = evalArr(this._createScopedPropsContext(hierarchy));
+      return Array.isArray(arr) ? arr.findIndex((i) => i === item) : -1;
+    } catch {
+      return -1;
+    }
   }
   updateItemNodes(
     nodes,
@@ -1950,7 +2178,46 @@ class PPHP {
     const loopContext = { ...scopedProps, [loopConfig.itemName]: newItem };
     if (loopConfig.idxName) loopContext[loopConfig.idxName] = newIndex;
     this.updateNodesContent(nodes, templateHierarchy, loopContext);
+    // NEW: Update pp-if conditions in the updated nodes
+    this.updateConditionalNodes(nodes, templateHierarchy, loopContext);
     this._currentTemplateHierarchy = null;
+  }
+  updateConditionalNodes(nodes, templateHierarchy, loopContext) {
+    nodes.forEach((node) => {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const element = node;
+        // Update pp-if elements
+        element
+          .querySelectorAll("[pp-if], [pp-elseif], [pp-else]")
+          .forEach((el) => {
+            const condition =
+              el.getAttribute("pp-if") || el.getAttribute("pp-elseif");
+            if (condition) {
+              const expr = condition.replace(/^{\s*|\s*}$/g, "");
+              try {
+                const fn = this.makeScopedEvaluator(expr, templateHierarchy);
+                const result = !!fn(loopContext);
+                if (result) {
+                  el.removeAttribute("hidden");
+                } else {
+                  el.setAttribute("hidden", "");
+                }
+              } catch (error) {
+                console.error("Error evaluating pp-if condition:", expr, error);
+              }
+            } else if (el.hasAttribute("pp-else")) {
+              // pp-else logic would need to check if previous siblings are hidden
+              // This is simplified - you might need more complex logic for pp-else
+              const prevSibling = el.previousElementSibling;
+              if (prevSibling && prevSibling.hasAttribute("hidden")) {
+                el.removeAttribute("hidden");
+              } else {
+                el.setAttribute("hidden", "");
+              }
+            }
+          });
+      }
+    });
   }
   updateNodesContent(nodes, templateHierarchy, loopContext) {
     nodes.forEach((node) => {
@@ -3283,30 +3550,33 @@ class PPHP {
   async processInlineModuleScripts(root = document.body) {
     this._inlineDepth++;
     try {
-      /* 1. gather every inline <script type="text/php"> -------------- */
       const scripts = Array.from(
         this.qsa(root, 'script[type="text/php"]:not([src])')
       ).filter((s) => !this._processedPhpScripts.has(s));
       if (scripts.length === 0) return;
-      // *** NEW: Sort scripts by hierarchy depth to process parents first ***
+      // ✅ ENHANCED: Better debugging of script hierarchy
       const scriptsByDepth = scripts
-        .map((script) => ({
-          script,
-          hierarchy: this.detectComponentHierarchy(script),
-          depth: this.detectComponentHierarchy(script).length,
-        }))
-        .sort((a, b) => a.depth - b.depth); // Process shallower (parent) components first
-      /* 2. iterate & import each script with hierarchy context ------- */
+        .map((script, index) => {
+          const hierarchy = this.detectComponentHierarchy(script);
+          const content = (script.textContent || "").trim().substring(0, 100);
+          return {
+            script,
+            hierarchy,
+            depth: hierarchy.length,
+          };
+        })
+        .sort((a, b) => a.depth - b.depth);
+      // Process scripts...
       for (const { script, hierarchy } of scriptsByDepth) {
-        // *** Get the hierarchy for this script ***
         this._currentProcessingHierarchy = hierarchy;
         const hierarchyKey = hierarchy.join(".");
         let src = (script.textContent || "").trim();
         src = this.decodeEntities(src);
         src = this.stripComments(src);
         src = this.transformStateDeclarations(src);
-        // *** IMPROVED: Inject scoped variables with better resolution ***
+        // ✅ This is where the injection happens
         src = this.injectScopedVariables(src, hierarchy);
+        // ... rest of the processing
         const rawSetters = this.extractSetters(src);
         if (rawSetters.length) {
           src += "\n\n";
@@ -3314,12 +3584,10 @@ class PPHP {
             src += `pphp._registerScopedFunction('${hierarchyKey}', '${fn}', ${fn});\n`;
           }
         }
-        /* 2-a. transform pphp.state / pphp.share shorthand ----------- */
         src = src.replace(
           /pphp\.(state|share)\(\s*(['"])([^'" ]+)\2\s*,/g,
           (_m, fn, _q, key) => `pphp.${fn}('${key}',`
         );
-        /* 2-b. automatically register any exported functions --------- */
         const exportStubs = [];
         for (const [, name] of [
           ...src.matchAll(/export\s+function\s+([A-Za-z_$]\w*)/g),
@@ -3330,7 +3598,6 @@ class PPHP {
           );
         }
         if (exportStubs.length) src += "\n\n" + exportStubs.join("\n");
-        /* 2-c. blob → import ---------------------------------------- */
         const blob = new Blob([src], { type: "application/javascript" });
         const url = URL.createObjectURL(blob);
         try {
@@ -3345,8 +3612,8 @@ class PPHP {
             }
           }
         } catch (err) {
-          console.error("Inline module import failed:", err);
-          console.error("Generated source:", src); // Add debugging
+          console.error("❌ Inline module import failed:", err);
+          console.error("📄 Generated source:", src);
         } finally {
           URL.revokeObjectURL(url);
           this._processedPhpScripts.add(script);
@@ -3366,18 +3633,54 @@ class PPHP {
   injectScopedVariables(src, hierarchy) {
     // Find all variable references in the script
     const variableRefs = this.extractVariableReferences(src);
-    // *** NEW: Find variables that are declared in this script ***
+    // ✅ SPECIAL DEBUG: If isOpen should be there but isn't, debug why
+    if (src.includes("isOpen") && !variableRefs.has("isOpen")) {
+      // Re-run extraction with detailed logging
+      let cleanSrc = src
+        .replace(/\/\*[\s\S]*?\*\//g, " ")
+        .replace(/\/\/.*$/gm, " ")
+        .replace(/(['"`])(?:\\.|(?!\1)[^\\])*\1/g, " ");
+      const variablePattern = /\b([a-zA-Z_$][a-zA-Z0-9_$]*)\b/g;
+      let match;
+      const allMatches = [];
+      while ((match = variablePattern.exec(cleanSrc)) !== null) {
+        allMatches.push({
+          name: match[1],
+          index: match.index,
+          context: cleanSrc.substring(
+            Math.max(0, match.index - 20),
+            match.index + match[1].length + 20
+          ),
+        });
+      }
+      // Find isOpen specifically
+      const isOpenMatches = allMatches.filter((m) => m.name === "isOpen");
+      // Test each match
+      isOpenMatches.forEach((m, i) => {
+        const beforeMatch = cleanSrc.substring(
+          Math.max(0, m.index - 50),
+          m.index
+        );
+        const afterMatch = cleanSrc.substring(
+          m.index + m.name.length,
+          m.index + m.name.length + 10
+        );
+      });
+    }
+    // Find variables that are declared in this script
     const declaredVars = this.extractDeclaredVariables(src);
+    const stateVars = this.extractStateVariables(src);
+    const allDeclaredVars = new Set([...declaredVars, ...stateVars]);
     // Create variable injections
     const injections = [];
     const injectedVars = new Set();
     for (const varName of variableRefs) {
       if (injectedVars.has(varName)) continue;
-      // *** NEW: Skip variables that are declared in this script ***
-      if (declaredVars.has(varName)) continue;
+      if (allDeclaredVars.has(varName)) {
+        continue;
+      }
       // Check if this variable exists in the scoped context
       if (this.hasInScopedContext(varName, hierarchy)) {
-        // *** FIXED: Use global reference instead of pphp.instance ***
         const scopedKey = this.findScopedKeyForVariable(varName, hierarchy);
         injections.push(`
 const ${varName} = (() => {
@@ -3388,10 +3691,9 @@ const ${varName} = (() => {
     return ctx.${varName};
   };
   
-  // Add dependency tracking key
+  fn.__isReactiveProxy = true;
   fn.__pphp_key = '${scopedKey}';
   
-  // Add value property for direct access
   Object.defineProperty(fn, 'value', {
     get() {
       const ctx = globalThis.pphp._createScopedPropsContext(${JSON.stringify(
@@ -3402,19 +3704,18 @@ const ${varName} = (() => {
     configurable: true
   });
   
-  // Add valueOf and toString for automatic coercion
   fn.valueOf = function() { return this.value; };
   fn.toString = function() { return String(this.value); };
   
   return fn;
 })();`);
-        // For setter functions, inject them directly
+        injectedVars.add(varName);
         const setterName = `set${varName
           .charAt(0)
           .toUpperCase()}${varName.slice(1)}`;
         if (
           this.hasInScopedContext(setterName, hierarchy) &&
-          !declaredVars.has(setterName)
+          !allDeclaredVars.has(setterName)
         ) {
           injections.push(`
 const ${setterName} = (...args) => {
@@ -3425,16 +3726,40 @@ const ${setterName} = (...args) => {
 };`);
           injectedVars.add(setterName);
         }
-        injectedVars.add(varName);
       }
     }
-    // Prepend injections to the source
     if (injections.length > 0) {
       return injections.join("\n") + "\n\n" + src;
     }
     return src;
   }
-  // *** NEW: Extract variables that are declared in the script ***
+  extractStateVariables(src) {
+    const stateVars = new Set();
+    // Pattern for pphp.state calls: const [varName, setterName] = pphp.state(...)
+    const statePattern =
+      /\b(?:const|let|var)\s+\[\s*([^,\]]+)(?:\s*,\s*([^,\]]+))?\s*\]\s*=\s*pphp\.state/g;
+    let match;
+    while ((match = statePattern.exec(src)) !== null) {
+      const varName = match[1]?.trim();
+      const setterName = match[2]?.trim();
+      if (varName) stateVars.add(varName);
+      if (setterName) stateVars.add(setterName);
+    }
+    // Also check for direct state calls: pphp.state('varName', ...)
+    const directStatePattern = /pphp\.state\s*\(\s*['"]([^'"]+)['"]/g;
+    while ((match = directStatePattern.exec(src)) !== null) {
+      const varName = match[1];
+      if (varName) {
+        stateVars.add(varName);
+        // Also add the likely setter name
+        const setterName = `set${varName
+          .charAt(0)
+          .toUpperCase()}${varName.slice(1)}`;
+        stateVars.add(setterName);
+      }
+    }
+    return stateVars;
+  }
   extractDeclaredVariables(src) {
     const declared = new Set();
     // Remove string literals and comments to avoid false matches
@@ -3446,33 +3771,69 @@ const ${setterName} = (...args) => {
     const patterns = [
       // const/let/var declarations
       /\b(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g,
-      // Destructuring declarations: const [foo, bar] = ...
-      /\b(?:const|let|var)\s+\[\s*([^}]+?)\s*\]/g,
+      // Array destructuring declarations - use [^\]] for arrays
+      /\b(?:const|let|var)\s+\[\s*([^\]]+?)\s*\]/g,
+      // Object destructuring declarations - use [^}] for objects
+      /\b(?:const|let|var)\s+\{\s*([^}]+?)\s*\}/g,
       // Function declarations
       /\bfunction\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g,
       // Arrow function assignments: const foo = () => ...
       /\b(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(?:\([^)]*\))?\s*=>/g,
+      // declarations
+      /\bexport\s+(?:function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)|(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*))/g,
     ];
     for (const pattern of patterns) {
       let match;
       while ((match = pattern.exec(cleanSrc)) !== null) {
-        if (pattern.source.includes("\\[")) {
-          // Handle destructuring: extract individual variable names
-          const destructured = match[1]
+        const varName = match[1] || match[2];
+        if (pattern.source.includes("\\[") && !pattern.source.includes("\\{")) {
+          // Handle ARRAY destructuring: [foo, bar, baz]
+          const destructured = varName
             .split(",")
             .map((v) => v.trim())
-            .filter(Boolean);
-          for (const varName of destructured) {
-            declared.add(varName);
+            .filter(Boolean)
+            .map((v) => {
+              if (v.startsWith("...")) {
+                return v.substring(3).trim();
+              }
+              return v;
+            });
+          for (const dVar of destructured) {
+            if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(dVar)) {
+              declared.add(dVar);
+            }
           }
-        } else {
-          declared.add(match[1]);
+        } else if (
+          pattern.source.includes("\\{") &&
+          !pattern.source.includes("\\[")
+        ) {
+          // Handle OBJECT destructuring: {foo, bar: baz}
+          const destructured = varName
+            .split(",")
+            .map((v) => v.trim())
+            .filter(Boolean)
+            .map((v) => {
+              const colonIndex = v.indexOf(":");
+              if (colonIndex !== -1) {
+                return v.substring(colonIndex + 1).trim();
+              }
+              if (v.startsWith("...")) {
+                return v.substring(3).trim();
+              }
+              return v;
+            });
+          for (const dVar of destructured) {
+            if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(dVar)) {
+              declared.add(dVar);
+            }
+          }
+        } else if (varName) {
+          declared.add(varName);
         }
       }
     }
     return declared;
   }
-  // *** NEW: Helper method to find the scoped key for a variable ***
   findScopedKeyForVariable(varName, hierarchy) {
     // Check current component scope
     const scopedKey = hierarchy.join(".");
@@ -3502,10 +3863,9 @@ const ${setterName} = (...args) => {
     const variables = new Set();
     // Remove string literals and comments to avoid false matches
     let cleanSrc = src
-      .replace(/\/\*[\s\S]*?\*\//g, "") // Remove block comments
-      .replace(/\/\/.*$/gm, "") // Remove line comments
-      .replace(/(['"`])(?:\\.|(?!\1)[^\\])*\1/g, ""); // Remove string literals
-    // *** IMPROVED: More precise variable pattern that excludes declarations ***
+      .replace(/\/\*[\s\S]*?\*\//g, " ") // Remove block comments -> replace with space
+      .replace(/\/\/.*$/gm, " ") // Remove line comments -> replace with space
+      .replace(/(['"`])(?:\\.|(?!\1)[^\\])*\1/g, " "); // Remove string literals -> replace with space
     const variablePattern = /\b([a-zA-Z_$][a-zA-Z0-9_$]*)\b/g;
     let match;
     while ((match = variablePattern.exec(cleanSrc)) !== null) {
@@ -3513,25 +3873,128 @@ const ${setterName} = (...args) => {
       const matchIndex = match.index;
       // Skip JavaScript keywords and built-ins
       if (this._reservedWords.has(varName)) continue;
-      // *** IMPROVED: Skip if it's part of a declaration ***
+      // ✅ CRITICAL FIX: More precise context checking
       const beforeMatch = cleanSrc.substring(
-        Math.max(0, matchIndex - 20),
+        Math.max(0, matchIndex - 50),
         matchIndex
       );
-      if (/\b(?:const|let|var|function)\s+$/.test(beforeMatch)) continue;
-      // Skip if it's in a destructuring pattern
-      if (/\[\s*[^}]*$/.test(beforeMatch)) continue;
-      // Skip if it's a property access (foo.bar - skip 'bar')
-      if (matchIndex > 0 && cleanSrc[matchIndex - 1] === ".") continue;
-      // Skip if it's an object property definition
       const afterMatch = cleanSrc.substring(
         matchIndex + varName.length,
-        matchIndex + varName.length + 5
+        matchIndex + varName.length + 10
       );
+      // Skip if it's part of a declaration
+      if (/\b(?:const|let|var|function|class|export)\s+$/.test(beforeMatch))
+        continue;
+      // Skip if it's a property being accessed (foo.bar -> skip 'bar')
+      if (matchIndex > 0 && cleanSrc[matchIndex - 1] === ".") continue;
+      // Skip if it's an object key (key: value)
       if (/^\s*:/.test(afterMatch)) continue;
+      // ✅ CRITICAL FIX: Don't skip variables inside function bodies
+      // The old logic was incorrectly flagging variables inside arrow functions as parameters
+      if (this.isActualFunctionParameter(cleanSrc, matchIndex, varName))
+        continue;
+      // ✅ CRITICAL FIX: Better destructuring detection
+      if (this.isInDestructuringDeclaration(cleanSrc, matchIndex, varName))
+        continue;
       variables.add(varName);
     }
     return variables;
+  }
+  isActualFunctionParameter(src, index, varName) {
+    // Look for the pattern: function(param) or (param) => or function name(param)
+    // First, find if we're between parentheses
+    let openParenIndex = -1;
+    let closeParenIndex = -1;
+    let parenDepth = 0;
+    // Look backwards for opening paren
+    for (let i = index - 1; i >= 0; i--) {
+      const char = src[i];
+      if (char === ")") parenDepth++;
+      else if (char === "(") {
+        if (parenDepth === 0) {
+          openParenIndex = i;
+          break;
+        } else {
+          parenDepth--;
+        }
+      }
+    }
+    if (openParenIndex === -1) return false;
+    // Look forwards for closing paren
+    parenDepth = 0;
+    for (let i = index + varName.length; i < src.length; i++) {
+      const char = src[i];
+      if (char === "(") parenDepth++;
+      else if (char === ")") {
+        if (parenDepth === 0) {
+          closeParenIndex = i;
+          break;
+        } else {
+          parenDepth--;
+        }
+      }
+    }
+    if (closeParenIndex === -1) return false;
+    // Check what comes before the opening paren
+    const beforeParen = src
+      .substring(Math.max(0, openParenIndex - 20), openParenIndex)
+      .trim();
+    // Check what comes after the closing paren
+    const afterParen = src
+      .substring(
+        closeParenIndex + 1,
+        Math.min(src.length, closeParenIndex + 10)
+      )
+      .trim();
+    // It's a function parameter if:
+    // 1. Before paren: 'function' or 'function name'
+    // 2. After paren: '=>' (arrow function)
+    const isFunctionDeclaration = /\bfunction(?:\s+[a-zA-Z_$]\w*)?\s*$/.test(
+      beforeParen
+    );
+    const isArrowFunction = afterParen.startsWith("=>");
+    // ✅ IMPORTANT: Only return true if it's actually a parameter declaration
+    // Variables used INSIDE function bodies should NOT be flagged as parameters
+    if (isFunctionDeclaration || isArrowFunction) {
+      // Double-check: make sure we're actually in the parameter list, not the body
+      const paramSection = src.substring(openParenIndex + 1, closeParenIndex);
+      // If there's a '=>' or '{' between the variable and the end, it's probably in the body
+      const afterVar = src.substring(index + varName.length, closeParenIndex);
+      if (afterVar.includes("=>") || afterVar.includes("{")) {
+        return false; // It's in the function body, not parameters
+      }
+      return true;
+    }
+    return false;
+  }
+  isInDestructuringDeclaration(src, index, varName) {
+    // Look backwards for destructuring patterns
+    const before = src.substring(Math.max(0, index - 100), index);
+    // Check for array destructuring: const [var] = ...
+    const arrayMatch = before.match(/\b(?:const|let|var)\s+\[\s*[^\]]*$/);
+    if (arrayMatch) {
+      // Make sure we can find the closing bracket after this variable
+      const after = src.substring(
+        index + varName.length,
+        Math.min(src.length, index + varName.length + 100)
+      );
+      if (/[^\]]*\]\s*=/.test(after)) {
+        return true;
+      }
+    }
+    // Check for object destructuring: const {var} = ...
+    const objectMatch = before.match(/\b(?:const|let|var)\s+\{\s*[^}]*$/);
+    if (objectMatch) {
+      // Make sure we can find the closing brace after this variable
+      const after = src.substring(
+        index + varName.length,
+        Math.min(src.length, index + varName.length + 100)
+      );
+      if (/[^}]*\}\s*=/.test(after)) {
+        return true;
+      }
+    }
+    return false;
   }
   hasInScopedContext(varName, hierarchy) {
     // Check scoped functions
@@ -6510,6 +6973,7 @@ const ${setterName} = (...args) => {
       this.reconcileHead(newDoc);
       /* 3.  reinicializar estado/reactividad ------------------------ */
       this.resetProps();
+      await this.bootstrapDeclarativeState(newDoc);
       await this.processInlineModuleScripts(newDoc);
       await this.initializeAllReferencedProps(newDoc);
       await this.manageAttributeBindings(newDoc);
@@ -6530,8 +6994,7 @@ const ${setterName} = (...args) => {
         placeholder.replaceWith(fresh); // ⇒ ejecuta in-place
       });
       /* 6.  re-hidratación y efectos ------------------------------- */
-      await this.processInlineModuleScripts(); // scripts recién añadidos
-      await this.bootstrapDeclarativeState();
+      await this.processInlineModuleScripts();
       await this.initRefs();
       await this.processIfChains();
       await this.initLoopBindings();
