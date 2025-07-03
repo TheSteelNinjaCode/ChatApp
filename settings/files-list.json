@@ -13,5 +13,6 @@
   "./src/app/js/json5.min.js",
   "./src/app/js/morphdom-umd.min.js",
   "./src/app/layout.php",
-  "./src/app/not-found.php"
+  "./src/app/not-found.php",
+  "./src/app/websocket/index.php"
 ]

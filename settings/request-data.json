@@ -1,4 +1,13 @@
 {
+    "websocket": {
+        "url": "websocket",
+        "fileName": "websocket",
+        "isCacheable": true,
+        "cacheTtl": 0,
+        "includedFiles": [
+            "C:\\xampp\\htdocs\\projects\\package-creations\\create-prisma-php-app-dev\\create-prisma-php-app-test\\ChatApp\\src\\app\\websocket\\index.php"
+        ]
+    },
     "\/": {
         "url": "\/",
         "fileName": "index",
